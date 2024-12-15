@@ -1,0 +1,21 @@
+# Core Dependencies
+--extra-index-url https://download.pytorch.org/whl/mac
+
+# Specific version or latest compatible
+torch
+torchvision
+torchaudio
+
+# Machine Learning Libraries
+transformers
+accelerate
+sentencepiece
+
+# Web Framework
+fastapi
+uvicorn
+
+# Utility Libraries
+numpy
+scipy
+scikit-learn
