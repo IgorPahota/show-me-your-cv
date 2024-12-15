@@ -1,0 +1,4 @@
+models/**
+.venv/
+./src/pycache/
+.idea/
