@@ -19,3 +19,6 @@ uvicorn
 numpy
 scipy
 scikit-learn
+
+# Image Processing
+pillow
