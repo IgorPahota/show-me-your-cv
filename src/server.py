@@ -7,7 +7,7 @@ from src.paligemma_model import PaLiGemmaModel
 
 app = FastAPI(title="LLM Inference Server")
 
-# Initialize both models
+# Initialize models as None
 llama_model = None
 paligemma_model = None
 
@@ -18,11 +18,20 @@ class QueryRequest(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     global llama_model, paligemma_model
-    llama_model = LLAMAModel()
-    paligemma_model = PaLiGemmaModel()
+    try:
+        llama_model = LLAMAModel()
+    except Exception as e:
+        print(f"Failed to load LLAMA model: {e}")
+        
+    try:
+        paligemma_model = PaLiGemmaModel()
+    except Exception as e:
+        print(f"Failed to load PaLiGemma model: {e}")
 
 @app.post("/generate/llama")
 async def generate_llama(request: QueryRequest):
+    if llama_model is None:
+        raise HTTPException(status_code=503, detail="LLAMA model not available")
     try:
         response = llama_model.generate_text(
             request.prompt,
@@ -34,6 +43,8 @@ async def generate_llama(request: QueryRequest):
 
 @app.post("/generate/paligemma")
 async def generate_paligemma(request: QueryRequest):
+    if paligemma_model is None:
+        raise HTTPException(status_code=503, detail="PaLiGemma model not available")
     try:
         response = paligemma_model.generate_text(
             request.prompt,

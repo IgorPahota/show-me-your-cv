@@ -2,3 +2,4 @@ models/**
 .venv/
 ./src/pycache/
 .idea/
+__pycache__/
