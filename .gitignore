@@ -3,3 +3,5 @@ models/**
 ./src/pycache/
 .idea/
 __pycache__/
+# API Keys
+src/api_keys.py

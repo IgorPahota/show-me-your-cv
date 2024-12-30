@@ -1,24 +1,14 @@
 # Core Dependencies
 --extra-index-url https://download.pytorch.org/whl/mac
 
-# Specific version or latest compatible
-torch
-torchvision
-torchaudio
-
-# Machine Learning Libraries
-transformers
-accelerate
-sentencepiece
+# Google AI
+google-generativeai>=0.3.2
 
 # Web Framework
-fastapi
-uvicorn
+fastapi>=0.109.0
+uvicorn>=0.27.0
+pydantic>=2.5.3
 
 # Utility Libraries
-numpy
-scipy
-scikit-learn
-
-# Image Processing
-pillow
+numpy>=1.26.3
+python-dotenv>=1.0.0

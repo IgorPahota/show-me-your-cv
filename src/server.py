@@ -2,14 +2,12 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
 import multiprocessing
-from src.llama_model import LLAMAModel
-from src.paligemma_model import PaLiGemmaModel
+from src.gemini_model import GeminiModel
 
 app = FastAPI(title="LLM Inference Server")
 
-# Initialize models as None
-llama_model = None
-paligemma_model = None
+# Initialize Gemini model
+gemini_model = None
 
 class QueryRequest(BaseModel):
     prompt: str
@@ -17,36 +15,19 @@ class QueryRequest(BaseModel):
 
 @app.on_event("startup")
 async def startup_event():
-    global llama_model, paligemma_model
+    global gemini_model
     try:
-        llama_model = LLAMAModel()
+        gemini_model = GeminiModel()
+        print("Successfully initialized Gemini model")
     except Exception as e:
-        print(f"Failed to load LLAMA model: {e}")
-        
-    try:
-        paligemma_model = PaLiGemmaModel()
-    except Exception as e:
-        print(f"Failed to load PaLiGemma model: {e}")
+        print(f"Failed to load Gemini model: {e}")
 
-@app.post("/generate/llama")
-async def generate_llama(request: QueryRequest):
-    if llama_model is None:
-        raise HTTPException(status_code=503, detail="LLAMA model not available")
+@app.post("/generate")
+async def generate(request: QueryRequest):
+    if gemini_model is None:
+        raise HTTPException(status_code=503, detail="Gemini model not available")
     try:
-        response = llama_model.generate_text(
-            request.prompt,
-            max_length=request.max_length
-        )
-        return {"response": response}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/generate/paligemma")
-async def generate_paligemma(request: QueryRequest):
-    if paligemma_model is None:
-        raise HTTPException(status_code=503, detail="PaLiGemma model not available")
-    try:
-        response = paligemma_model.generate_text(
+        response = gemini_model.generate_text(
             request.prompt,
             max_length=request.max_length
         )
