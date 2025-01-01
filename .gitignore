@@ -5,3 +5,4 @@ models/**
 __pycache__/
 # API Keys
 src/api_keys.py
+.env
