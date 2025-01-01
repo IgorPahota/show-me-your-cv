@@ -10,7 +10,8 @@ TELEGRAM_JOB_CHANNELS = [
     'remoteworkjobs',
     'jobsremotely',
     'remote_jobs_it',
-    'remote_jobs_worldwide'
+    'remote_jobs_worldwide',
+    '@jobs_in_it_remoute'
 ]
 
 # Gemini API key

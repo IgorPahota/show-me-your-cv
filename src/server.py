@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 import asyncio
 from datetime import datetime
+from src.api_keys import TELEGRAM_JOB_CHANNELS
 
 app = FastAPI(
     title="Job Search and AI Assistant",
@@ -48,10 +49,13 @@ async def startup_event():
     
     try:
         telegram_client = TelegramJobClient()
-        await telegram_client.start()
-        print("Successfully initialized Telegram client")
-        # Start initial job scraping
-        asyncio.create_task(telegram_client.start_job_monitoring())
+        auth_success = await telegram_client.start()
+        if auth_success:
+            print("Successfully initialized and authenticated Telegram client")
+            # Start initial job scraping
+            asyncio.create_task(telegram_client.start_job_monitoring())
+        else:
+            print("Failed to authenticate Telegram client")
     except Exception as e:
         print(f"Failed to initialize Telegram client: {e}")
 
@@ -187,6 +191,29 @@ async def get_job_stats(db: Session = Depends(get_db)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/jobs/scrape")
+async def trigger_scraping():
+    """Manually trigger job scraping from Telegram channels"""
+    if telegram_client is None:
+        raise HTTPException(status_code=503, detail="Telegram client not available")
+    
+    try:
+        await telegram_client._scrape_recent_jobs()
+        return {"status": "success", "message": "Job scraping completed"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/jobs/channels")
+async def list_channels():
+    """List all configured job channels"""
+    if telegram_client is None:
+        raise HTTPException(status_code=503, detail="Telegram client not available")
+    
+    return {
+        "channels": TELEGRAM_JOB_CHANNELS,
+        "total": len(TELEGRAM_JOB_CHANNELS)
+    }
 
 def start_server(host="0.0.0.0", port=8000):
     uvicorn.run(app, host=host, port=port)

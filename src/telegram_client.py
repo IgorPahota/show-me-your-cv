@@ -7,6 +7,7 @@ from src.api_keys import TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_JOB_CHANNE
 from src.models.database import Job, SessionLocal
 import re
 import asyncio
+import os
 
 class TelegramJobClient:
     def __init__(self):
@@ -24,10 +25,98 @@ class TelegramJobClient:
             "security": ["security engineer", "penetration tester", "security analyst", "cybersecurity"]
         }
         self.monitoring = False
+        self.auth_retries = 0
+        self.max_auth_retries = 3
 
     async def start(self):
-        """Start the client"""
-        await self.client.start()
+        """Start the client and ensure authentication"""
+        try:
+            print("Starting Telegram client...")
+            await self.client.connect()
+            
+            if not await self.client.is_user_authorized():
+                phone = os.getenv('TELEGRAM_PHONE')
+                if not phone:
+                    print("TELEGRAM_PHONE environment variable not set")
+                    return False
+                
+                print(f"Attempting to authenticate with phone number: {phone}")
+                # Send code request and store the phone_code_hash
+                result = await self.client.send_code_request(phone)
+                phone_code_hash = result.phone_code_hash
+                print("Verification code has been sent. Please run:")
+                print(f"docker exec -it show-me-your-cv-app-1 python3 -c 'from src.telegram_client import TelegramJobClient; import asyncio; asyncio.run(TelegramJobClient().enter_code(\"{phone}\", \"{phone_code_hash}\"))'")
+                return False
+                
+            print("Telegram client authenticated successfully")
+            return True
+        except Exception as e:
+            print(f"Error during Telegram authentication: {str(e)}")
+            return False
+
+    async def enter_code(self, phone, phone_code_hash):
+        """Helper method to enter verification code"""
+        try:
+            print("\n=== Starting Telegram Authentication ===")
+            print(f"Phone number: {phone}")
+            print(f"Phone code hash: {phone_code_hash}")
+            
+            await self.client.connect()
+            if await self.client.is_user_authorized():
+                print("Already authenticated!")
+                return
+
+            try:
+                code = input("Please enter the verification code you received: ").strip()
+                if not code:
+                    print("Error: Code cannot be empty")
+                    return
+                
+                print(f"Received code: {code}")
+                print("Attempting to sign in...")
+                
+                # Try to send the code request again to ensure we're in the right state
+                try:
+                    print("Requesting new code...")
+                    result = await self.client.send_code_request(phone)
+                    phone_code_hash = result.phone_code_hash
+                    print(f"New phone code hash: {phone_code_hash}")
+                except Exception as e:
+                    print(f"Error requesting new code: {str(e)}")
+                
+                # Try sign in with both methods
+                try:
+                    print("Attempting sign in method 1...")
+                    await self.client.sign_in(phone, code)
+                except Exception as e:
+                    print(f"Method 1 failed: {str(e)}")
+                    print("Attempting sign in method 2...")
+                    try:
+                        await self.client.sign_in(
+                            phone=phone,
+                            code=code,
+                            phone_code_hash=phone_code_hash
+                        )
+                    except Exception as e:
+                        print(f"Method 2 failed: {str(e)}")
+                        raise e
+
+                print("Authentication successful!")
+            except ValueError as e:
+                print(f"Invalid code format: {str(e)}")
+            except Exception as e:
+                print(f"Error during sign in: {str(e)}")
+                print("Debug info:")
+                print(f"Phone: {phone}")
+                print(f"Code entered: {code}")
+                print(f"Code length: {len(code)}")
+                print(f"Code hash: {phone_code_hash}")
+                print(f"Code hash length: {len(phone_code_hash)}")
+        except Exception as e:
+            print(f"Error during code verification: {str(e)}")
+        finally:
+            await self.client.disconnect()
+            print("=== Authentication Process Complete ===\n")
 
     async def stop(self):
         """Stop the client"""
