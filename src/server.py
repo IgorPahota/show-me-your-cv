@@ -53,23 +53,109 @@ class JobResponse(BaseModel):
     telegram_forwards: Optional[int]
 
 @app.get("/", response_class=HTMLResponse)
-async def root():
-    """Simple dashboard page"""
-    return """
+async def root(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(10, ge=1, le=50),
+    db: Session = Depends(get_db)
+):
+    """Dashboard page with job cards"""
+    # Get jobs with pagination
+    offset = (page - 1) * per_page
+    total_jobs = db.query(Job).count()
+    total_pages = (total_jobs + per_page - 1) // per_page
+    
+    jobs = db.query(Job).order_by(desc(Job.telegram_message_date)).offset(offset).limit(per_page).all()
+    
+    # Generate page links
+    page_links = []
+    for p in range(max(1, page - 2), min(total_pages + 1, page + 3)):
+        page_links.append(f'<li class="page-item {"active" if p == page else ""}"><a class="page-link" href="/?page={p}">{p}</a></li>')
+    
+    # Generate job cards HTML
+    job_cards = []
+    for job in jobs:
+        telegram_link = job.url
+        job_date = job.telegram_message_date.strftime("%Y-%m-%d %H:%M:%S")
+        
+        card_html = f"""
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">{job.title}</h5>
+                <span class="badge bg-primary">{job.telegram_channel_name}</span>
+            </div>
+            <div class="card-body">
+                <div class="mb-3" style="white-space: pre-wrap;">{job.telegram_raw_text}</div>
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <small class="text-muted">Posted: {job_date}</small>
+                        {f'<br><small class="text-muted">Views: {job.telegram_views}</small>' if job.telegram_views else ''}
+                        {f'<br><small class="text-muted">Forwards: {job.telegram_forwards}</small>' if job.telegram_forwards else ''}
+                    </div>
+                    <a href="{telegram_link}" target="_blank" class="btn btn-sm btn-outline-primary">
+                        View on Telegram
+                    </a>
+                </div>
+            </div>
+            <div class="card-footer">
+                <div class="d-flex flex-wrap gap-2">
+                    {'<span class="badge bg-success">Remote</span>' if job.remote else ''}
+                    {' '.join(f'<span class="badge bg-info">{cat}</span>' for cat in (job.categories or []))}
+                </div>
+            </div>
+        </div>
+        """
+        job_cards.append(card_html)
+    
+    return f"""
     <html>
         <head>
             <title>Job Scraper Dashboard</title>
             <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+            <style>
+                .card {{ box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
+                .badge {{ margin-right: 4px; }}
+                pre {{ white-space: pre-wrap; }}
+            </style>
         </head>
-        <body class="container mt-5">
-            <h1>Job Scraper Dashboard</h1>
-            <div class="list-group mt-4">
-                <a href="/docs" class="list-group-item list-group-item-action">Interactive API Documentation (Swagger UI)</a>
-                <a href="/redoc" class="list-group-item list-group-item-action">Alternative API Documentation (ReDoc)</a>
-                <a href="/jobs/latest" class="list-group-item list-group-item-action">View Latest Jobs</a>
-                <a href="/jobs/stats" class="list-group-item list-group-item-action">View Job Statistics</a>
-                <a href="/jobs/channels" class="list-group-item list-group-item-action">View Monitored Channels</a>
-            </div>
+        <body class="container py-5">
+            <header class="mb-5">
+                <h1 class="mb-4">Job Scraper Dashboard</h1>
+                <div class="btn-group mb-4">
+                    <a href="/docs" class="btn btn-outline-primary">API Documentation</a>
+                    <a href="/jobs/stats" class="btn btn-outline-info">Job Statistics</a>
+                    <a href="/jobs/channels" class="btn btn-outline-secondary">Monitored Channels</a>
+                </div>
+                <div class="d-flex justify-content-between align-items-center">
+                    <p class="mb-0">Total Jobs: {total_jobs}</p>
+                    <form class="d-flex" action="/" method="get">
+                        <select name="per_page" class="form-select me-2" onchange="this.form.submit()">
+                            <option value="10" {"selected" if per_page == 10 else ""}>10 per page</option>
+                            <option value="20" {"selected" if per_page == 20 else ""}>20 per page</option>
+                            <option value="50" {"selected" if per_page == 50 else ""}>50 per page</option>
+                        </select>
+                    </form>
+                </div>
+            </header>
+            
+            <main>
+                {''.join(job_cards)}
+            </main>
+            
+            <nav aria-label="Page navigation" class="my-4">
+                <ul class="pagination justify-content-center">
+                    <li class="page-item {'' if page > 1 else 'disabled'}">
+                        <a class="page-link" href="/?page={page-1}" tabindex="-1">Previous</a>
+                    </li>
+                    {''.join(page_links)}
+                    <li class="page-item {'' if page < total_pages else 'disabled'}">
+                        <a class="page-link" href="/?page={page+1}">Next</a>
+                    </li>
+                </ul>
+            </nav>
+            
+            <footer class="text-center text-muted mt-5">
+                <small>Last update: {datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}</small>
+            </footer>
         </body>
     </html>
     """
