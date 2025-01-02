@@ -39,6 +39,16 @@ class Job(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+class TelegramChannel(Base):
+    __tablename__ = 'telegram_channels'
+
+    id = Column(Integer, primary_key=True)
+    channel_name = Column(String(255), unique=True, nullable=False)
+    is_active = Column(Boolean, default=True)
+    last_scraped = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 # Database connection
 DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/jobs_db')
 engine = create_engine(DATABASE_URL)

@@ -3,8 +3,8 @@ from telethon.tl.functions.messages import SearchRequest, GetHistoryRequest
 from telethon.tl.types import InputMessagesFilterEmpty
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
-from src.api_keys import TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_JOB_CHANNELS
-from src.models.database import Job, SessionLocal
+from src.api_keys import TELEGRAM_API_ID, TELEGRAM_API_HASH
+from src.models.database import Job, TelegramChannel, SessionLocal
 import re
 import asyncio
 import os
@@ -23,8 +23,8 @@ class TelegramJobClient:
             self.session_file,
             TELEGRAM_API_ID,
             TELEGRAM_API_HASH,
-            system_version="4.16.30-vxCUSTOM",  # Set a stable system version
-            device_model="Desktop",  # Set a stable device model
+            system_version="4.16.30-vxCUSTOM",
+            device_model="Desktop",
         )
         self.db = SessionLocal()
         self.job_keywords = ["hiring", "job", "position", "role", "vacancy", "opening"]
@@ -42,145 +42,47 @@ class TelegramJobClient:
         self.auth_retries = 0
         self.max_auth_retries = 3
 
-    async def start(self):
-        """Start the client and ensure authentication"""
-        try:
-            print("\n=== Starting Telegram Client ===")
-            print(f"Session file path: {self.session_file}")
-            print(f"Session file exists: {os.path.exists(f'{self.session_file}.session')}")
-            
-            # List contents of sessions directory
-            sessions_dir = '/app/sessions'
-            if os.path.exists(sessions_dir):
-                print("Contents of sessions directory:")
-                for item in os.listdir(sessions_dir):
-                    print(f"- {item}")
-            
-            await self.client.connect()
-            
-            # Check if we're already authorized
-            is_authorized = await self.client.is_user_authorized()
-            print(f"Client authorized: {is_authorized}")
-            
-            if is_authorized:
-                print("Successfully loaded existing session")
-                return True
-                
-            # If we're not authorized and have a session file, something is wrong
-            if os.path.exists(f"{self.session_file}.session"):
-                print("Warning: Session file exists but client is not authorized")
-                print("This might indicate a corrupted or invalid session")
-                # Don't immediately try to re-authenticate, as the session might still be valid
-                return False
-            
-            # No valid session, need to authenticate
-            phone = os.getenv('TELEGRAM_PHONE')
-            if not phone:
-                print("TELEGRAM_PHONE environment variable not set")
-                return False
-            
-            print(f"No valid session found. Attempting to authenticate with phone number: {phone}")
-            result = await self.client.send_code_request(phone)
-            phone_code_hash = result.phone_code_hash
-            print("Verification code has been sent. Please run:")
-            print(f"docker exec -it show-me-your-cv-app-1 python3 -c 'from src.telegram_client import TelegramJobClient; import asyncio; asyncio.run(TelegramJobClient().enter_code(\"{phone}\", \"{phone_code_hash}\"))'")
-            return False
-                
-        except Exception as e:
-            print(f"Error during Telegram authentication: {str(e)}")
-            return False
-
-    async def enter_code(self, phone, phone_code_hash):
-        """Helper method to enter verification code"""
-        try:
-            print("\n=== Starting Telegram Authentication ===")
-            print(f"Phone number: {phone}")
-            print(f"Phone code hash: {phone_code_hash}")
-            
-            await self.client.connect()
-            if await self.client.is_user_authorized():
-                print("Already authenticated!")
-                return
-
-            try:
-                code = input("Please enter the verification code you received: ").strip()
-                if not code:
-                    print("Error: Code cannot be empty")
-                    return
-                
-                print(f"Received code: {code}")
-                print("Attempting to sign in...")
-                
-                # Try to send the code request again to ensure we're in the right state
-                try:
-                    print("Requesting new code...")
-                    result = await self.client.send_code_request(phone)
-                    phone_code_hash = result.phone_code_hash
-                    print(f"New phone code hash: {phone_code_hash}")
-                except Exception as e:
-                    print(f"Error requesting new code: {str(e)}")
-                
-                # Try sign in with both methods
-                try:
-                    print("Attempting sign in method 1...")
-                    await self.client.sign_in(phone, code)
-                except Exception as e:
-                    print(f"Method 1 failed: {str(e)}")
-                    print("Attempting sign in method 2...")
-                    try:
-                        await self.client.sign_in(
-                            phone=phone,
-                            code=code,
-                            phone_code_hash=phone_code_hash
-                        )
-                    except Exception as e:
-                        print(f"Method 2 failed: {str(e)}")
-                        raise e
-
-                print("Authentication successful!")
-            except ValueError as e:
-                print(f"Invalid code format: {str(e)}")
-            except Exception as e:
-                print(f"Error during sign in: {str(e)}")
-                print("Debug info:")
-                print(f"Phone: {phone}")
-                print(f"Code entered: {code}")
-                print(f"Code length: {len(code)}")
-                print(f"Code hash: {phone_code_hash}")
-                print(f"Code hash length: {len(phone_code_hash)}")
-        except Exception as e:
-            print(f"Error during code verification: {str(e)}")
-        finally:
-            await self.client.disconnect()
-            print("=== Authentication Process Complete ===\n")
-
-    async def stop(self):
-        """Stop the client"""
-        self.monitoring = False
-        await self.client.disconnect()
+    async def get_active_channels(self) -> List[str]:
+        """Get list of active channels from database"""
+        channels = self.db.query(TelegramChannel).filter(TelegramChannel.is_active == True).all()
+        return [channel.channel_name for channel in channels]
 
     async def start_job_monitoring(self):
         """Start monitoring job channels"""
         self.monitoring = True
         while self.monitoring:
             try:
-                await self._scrape_recent_jobs()
+                channels = await self.get_active_channels()
+                if not channels:
+                    print("No active channels configured in database")
+                    await asyncio.sleep(300)  # Wait 5 minutes before checking again
+                    continue
+                
+                print(f"Found {len(channels)} active channels to monitor")
+                for channel in channels:
+                    try:
+                        await self._scrape_recent_jobs(channel)
+                    except Exception as e:
+                        print(f"Error scraping channel {channel}: {str(e)}")
+                
                 # Wait for 30 minutes before next scrape
                 await asyncio.sleep(1800)
             except Exception as e:
                 print(f"Error in job monitoring: {str(e)}")
                 await asyncio.sleep(60)  # Wait a minute before retrying
 
-    async def _scrape_recent_jobs(self):
-        """Scrape recent jobs from all channels"""
+    async def _scrape_recent_jobs(self, channel_name: str = None, limit: int = 50):
+        """Scrape recent jobs from specified channel or all channels"""
         print("\n=== Starting Job Scraping ===")
-        print(f"Channels to scrape: {TELEGRAM_JOB_CHANNELS}")
+        print(f"Message limit per channel: {limit}")
         
-        if not TELEGRAM_JOB_CHANNELS:
+        channels_to_scrape = [channel_name] if channel_name else await self.get_active_channels()
+        
+        if not channels_to_scrape:
             print("No channels configured for scraping!")
             return
             
-        for channel in TELEGRAM_JOB_CHANNELS:
+        for channel in channels_to_scrape:
             try:
                 print(f"\n{'='*50}")
                 print(f"Processing channel: {channel}")
@@ -190,11 +92,17 @@ class TelegramJobClient:
                 channel_entity = await self.client.get_entity(channel)
                 print(f"Successfully got entity for channel: {channel}")
                 
+                # Update channel name in database with actual username
+                channel_record = self.db.query(TelegramChannel).filter(TelegramChannel.channel_name == channel).first()
+                if channel_record:
+                    channel_record.last_scraped = datetime.utcnow()
+                    self.db.commit()
+                
                 # Get recent messages
-                print("Fetching recent messages...")
+                print(f"Fetching up to {limit} messages...")
                 messages = await self.client(GetHistoryRequest(
                     peer=channel_entity,
-                    limit=50,  # Last 50 messages
+                    limit=limit,
                     offset_date=None,
                     offset_id=0,
                     max_id=0,
@@ -229,6 +137,12 @@ class TelegramJobClient:
 
             except Exception as e:
                 print(f"Error scraping channel {channel}: {str(e)}")
+                # Update channel status in database
+                channel_record = self.db.query(TelegramChannel).filter(TelegramChannel.channel_name == channel).first()
+                if channel_record:
+                    print(f"Marking channel {channel} as inactive due to error")
+                    channel_record.is_active = False
+                    self.db.commit()
         
         print("\n=== Job Scraping Complete ===\n")
 
@@ -256,6 +170,9 @@ class TelegramJobClient:
         """Process a Telegram message into a job posting"""
         try:
             print(f"\nProcessing message ID: {message.id}")
+            print(f"Message date: {message.date}")
+            print(f"Channel ID: {message.peer_id.channel_id}")
+            
             # Extract relevant information from the message
             text = message.message
             lines = text.split('\n')
@@ -263,6 +180,16 @@ class TelegramJobClient:
             # Try to extract title
             title = next((line for line in lines if any(keyword in line.lower() for keyword in self.job_keywords)), lines[0])
             print(f"Extracted title: {title}")
+            
+            # Create unique job ID
+            job_id = f"tg_{message.id}_{message.peer_id.channel_id}"
+            print(f"Generated job ID: {job_id}")
+            
+            # Check for existing job first
+            print(f"Checking for existing job with ID: {job_id}")
+            existing_job = self.db.query(Job).filter(Job.job_id == job_id).first()
+            if existing_job:
+                print(f"Found existing job in database. Last updated: {existing_job.updated_at}")
             
             # Try to extract company name
             company_pattern = r"(?i)(?:at|@|company:?)\s*([A-Za-z0-9\s]+(?:Inc\.?|LLC|Ltd\.?|Limited|Corp\.?|Corporation)?)"
@@ -285,10 +212,6 @@ class TelegramJobClient:
             # Categorize job
             categories = self._categorize_job(text)
             print(f"Categorized as: {categories}")
-            
-            # Create unique job ID
-            job_id = f"tg_{message.id}_{message.peer_id.channel_id}"
-            print(f"Generated job ID: {job_id}")
             
             # Collect all available message metadata
             metadata = {
@@ -333,8 +256,6 @@ class TelegramJobClient:
                 telegram_metadata=metadata
             )
 
-            print("Checking for existing job...")
-            existing_job = self.db.query(Job).filter(Job.job_id == job.job_id).first()
             if existing_job:
                 print("Updating existing job...")
                 # Update existing job
@@ -343,30 +264,35 @@ class TelegramJobClient:
                         setattr(existing_job, key, value)
                 existing_job.updated_at = datetime.utcnow()
                 job = existing_job
+                print(f"Job updated. New update time: {job.updated_at}")
             else:
                 print("Adding new job to database...")
                 self.db.add(job)
 
             print("Committing to database...")
-            self.db.commit()
-            print("Refreshing job object...")
-            self.db.refresh(job)
-            print("Successfully saved to database!")
-            
-            return {
-                "id": job.job_id,
-                "title": job.title,
-                "company": job.company_name,
-                "location": job.location,
-                "description": job.description,
-                "url": job.url,
-                "remote": job.remote,
-                "salary_min": job.salary_min,
-                "salary_max": job.salary_max,
-                "currency": job.currency,
-                "categories": job.categories,
-                "telegram_metadata": metadata
-            }
+            try:
+                self.db.commit()
+                print("Successfully committed to database!")
+                self.db.refresh(job)
+                print(f"Job refreshed. ID: {job.job_id}, Title: {job.title}")
+                return {
+                    "id": job.job_id,
+                    "title": job.title,
+                    "company": job.company_name,
+                    "location": job.location,
+                    "description": job.description,
+                    "url": job.url,
+                    "remote": job.remote,
+                    "salary_min": job.salary_min,
+                    "salary_max": job.salary_max,
+                    "currency": job.currency,
+                    "categories": job.categories,
+                    "telegram_metadata": metadata
+                }
+            except Exception as e:
+                print(f"Error committing to database: {str(e)}")
+                self.db.rollback()
+                raise
 
         except Exception as e:
             print(f"Error processing Telegram message: {str(e)}")
@@ -408,3 +334,80 @@ class TelegramJobClient:
         if self.client.is_connected():
             import asyncio
             asyncio.run(self.client.disconnect()) 
+
+    async def start(self):
+        """Start the client and ensure authentication"""
+        try:
+            print("\n=== Starting Telegram Client ===")
+            print(f"Session file path: {self.session_file}")
+            print(f"Session file exists: {os.path.exists(f'{self.session_file}.session')}")
+            
+            await self.client.connect()
+            
+            # Check if we're already authorized
+            is_authorized = await self.client.is_user_authorized()
+            print(f"Client authorized: {is_authorized}")
+            
+            if is_authorized:
+                print("Successfully loaded existing session")
+                return True
+                
+            # If we're not authorized and have a session file, something is wrong
+            if os.path.exists(f"{self.session_file}.session"):
+                print("Warning: Session file exists but client is not authorized")
+                print("This might indicate a corrupted or invalid session")
+                return False
+            
+            # No valid session, need to authenticate
+            phone = os.getenv('TELEGRAM_PHONE')
+            if not phone:
+                print("TELEGRAM_PHONE environment variable not set")
+                return False
+            
+            print(f"No valid session found. Attempting to authenticate with phone number: {phone}")
+            result = await self.client.send_code_request(phone)
+            phone_code_hash = result.phone_code_hash
+            print("Verification code has been sent. Please run:")
+            print(f"docker exec -it show-me-your-cv-app-1 python3 -c 'from src.telegram_client import TelegramJobClient; import asyncio; asyncio.run(TelegramJobClient().enter_code(\"{phone}\", \"{phone_code_hash}\"))'")
+            return False
+                
+        except Exception as e:
+            print(f"Error during Telegram authentication: {str(e)}")
+            return False
+
+    async def enter_code(self, phone, phone_code_hash):
+        """Helper method to enter verification code"""
+        try:
+            print("\n=== Starting Telegram Authentication ===")
+            print(f"Phone number: {phone}")
+            print(f"Phone code hash: {phone_code_hash}")
+            
+            await self.client.connect()
+            if await self.client.is_user_authorized():
+                print("Already authenticated!")
+                return
+            
+            code = input("Please enter the verification code you received: ").strip()
+            if not code:
+                print("Error: Code cannot be empty")
+                return
+            
+            print(f"Received code: {code}")
+            print("Attempting to sign in...")
+            
+            try:
+                await self.client.sign_in(phone=phone, code=code, phone_code_hash=phone_code_hash)
+                print("Authentication successful!")
+            except Exception as e:
+                print(f"Error during sign in: {str(e)}")
+                
+        except Exception as e:
+            print(f"Error during code verification: {str(e)}")
+        finally:
+            await self.client.disconnect()
+            print("=== Authentication Process Complete ===\n")
+
+    async def stop(self):
+        """Stop the client"""
+        self.monitoring = False
+        await self.client.disconnect() 
