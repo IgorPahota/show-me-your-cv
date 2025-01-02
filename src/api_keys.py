@@ -6,11 +6,6 @@ TELEGRAM_API_HASH = os.getenv('TELEGRAM_API_HASH', '')
 
 # List of Telegram channels to monitor for jobs
 TELEGRAM_JOB_CHANNELS = [
-    'remote_it_jobs',
-    'remoteworkjobs',
-    'jobsremotely',
-    'remote_jobs_it',
-    'remote_jobs_worldwide',
     '@jobs_in_it_remoute'
 ]
 
