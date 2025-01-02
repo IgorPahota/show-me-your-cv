@@ -1,4 +1,14 @@
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, JSON, BigInteger, Text
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Boolean,
+    Float,
+    DateTime,
+    JSON,
+    BigInteger,
+    Text,
+)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
@@ -7,12 +17,13 @@ from datetime import datetime
 
 Base = declarative_base()
 
+
 class Job(Base):
-    __tablename__ = 'jobs'
+    __tablename__ = "jobs"
 
     id = Column(Integer, primary_key=True)
     job_id = Column(String(255), unique=True, nullable=False)
-    
+
     # Basic job info
     title = Column(String(255))
     company_name = Column(String(255))
@@ -24,7 +35,7 @@ class Job(Base):
     salary_max = Column(Float)
     currency = Column(String(10))
     categories = Column(JSON)
-    
+
     # Telegram specific metadata
     telegram_message_id = Column(BigInteger)
     telegram_channel_id = Column(BigInteger)
@@ -34,13 +45,14 @@ class Job(Base):
     telegram_forwards = Column(Integer)
     telegram_raw_text = Column(Text)  # Original unprocessed message
     telegram_metadata = Column(JSON)  # Store any additional metadata
-    
+
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+
 class TelegramChannel(Base):
-    __tablename__ = 'telegram_channels'
+    __tablename__ = "telegram_channels"
 
     id = Column(Integer, primary_key=True)
     channel_name = Column(String(255), unique=True, nullable=False)
@@ -49,10 +61,14 @@ class TelegramChannel(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+
 # Database connection
-DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/jobs_db')
+DATABASE_URL = os.getenv(
+    "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/jobs_db"
+)
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
 
 def get_db():
     db = SessionLocal()
@@ -61,5 +77,6 @@ def get_db():
     finally:
         db.close()
 
+
 # Create tables
-Base.metadata.create_all(bind=engine) 
+Base.metadata.create_all(bind=engine)

@@ -1,50 +1,67 @@
 version: '3.8'
 
 services:
-  app:
+  web:
     build: .
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/app
+      - telegram_sessions:/app/sessions
     ports:
       - "8000:8000"
-    volumes:
-      - ./src:/app/src
-      - telegram_sessions:/app/sessions:rw
-    environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/jobs_db
-      - TELEGRAM_API_ID=${TELEGRAM_API_ID}
-      - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
-      - TELEGRAM_PHONE=${TELEGRAM_PHONE}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    env_file:
+      - .env
     depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - app-network
-    restart: unless-stopped
-
-  postgres:
-    image: postgres:16
+      - db
+      - redis
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: jobs_db
-    ports:
-      - "5432:5432"
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/jobs_db
+      - REDIS_URL=redis://redis:6379/0
+
+  db:
+    image: postgres:15
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - app-network
-    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=jobs_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "5432:5432"
 
-networks:
-  app-network:
-    driver: bridge
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  celery:
+    build: .
+    command: celery -A config worker -l INFO
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      - web
+      - redis
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/jobs_db
+      - REDIS_URL=redis://redis:6379/0
+
+  celery-beat:
+    build: .
+    command: celery -A config beat -l INFO
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      - web
+      - redis
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/jobs_db
+      - REDIS_URL=redis://redis:6379/0
 
 volumes:
   postgres_data:
-  telegram_sessions:
-    name: show-me-your-cv_telegram_sessions 
+  telegram_sessions: 

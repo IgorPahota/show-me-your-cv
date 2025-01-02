@@ -16,8 +16,8 @@ app = FastAPI(
     title="Job Search API",
     description="API for searching and viewing jobs scraped from Telegram channels",
     version="1.0.0",
-    docs_url="/docs",   # Swagger UI endpoint
-    redoc_url="/redoc"  # ReDoc endpoint
+    docs_url="/docs",  # Swagger UI endpoint
+    redoc_url="/redoc",  # ReDoc endpoint
 )
 
 # Enable CORS
@@ -32,6 +32,7 @@ app.add_middleware(
 # Initialize services
 gemini_model = None
 telegram_client = None
+
 
 class JobResponse(BaseModel):
     id: str
@@ -51,11 +52,12 @@ class JobResponse(BaseModel):
     telegram_views: Optional[int]
     telegram_forwards: Optional[int]
 
+
 @app.get("/", response_class=HTMLResponse)
 async def root(
     page: int = Query(1, ge=1),
     per_page: int = Query(10, ge=1, le=50),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """Dashboard page with job cards and controls"""
     # Check Telegram client status
@@ -68,19 +70,13 @@ async def root(
         except Exception as e:
             telegram_status = "error"
             telegram_error = str(e)
-    
+
     # Get service status
     service_status = {
-        "telegram": {
-            "status": telegram_status,
-            "error": telegram_error
-        },
-        "database": {
-            "status": "connected",
-            "error": None
-        }
+        "telegram": {"status": telegram_status, "error": telegram_error},
+        "database": {"status": "connected", "error": None},
     }
-    
+
     try:
         db.execute(text("SELECT 1"))
     except Exception as e:
@@ -90,23 +86,31 @@ async def root(
     # Add status alert HTML
     status_alerts = []
     if service_status["telegram"]["status"] != "connected":
-        alert_type = "warning" if service_status["telegram"]["status"] == "unauthorized" else "danger"
-        status_alerts.append(f"""
+        alert_type = (
+            "warning"
+            if service_status["telegram"]["status"] == "unauthorized"
+            else "danger"
+        )
+        status_alerts.append(
+            f"""
         <div class="alert alert-{alert_type} alert-dismissible fade show" role="alert">
             <strong>Telegram Status:</strong> {service_status["telegram"]["status"]}
             {f'<br><small>{service_status["telegram"]["error"]}</small>' if service_status["telegram"]["error"] else ''}
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
-        """)
-    
+        """
+        )
+
     if service_status["database"]["status"] != "connected":
-        status_alerts.append(f"""
+        status_alerts.append(
+            f"""
         <div class="alert alert-danger alert-dismissible fade show" role="alert">
             <strong>Database Status:</strong> {service_status["database"]["status"]}
             {f'<br><small>{service_status["database"]["error"]}</small>' if service_status["database"]["error"] else ''}
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
-        """)
+        """
+        )
 
     # Add status indicators to the header
     status_indicators = f"""
@@ -123,40 +127,50 @@ async def root(
     """
 
     print("\n=== Loading Dashboard ===")
-    
+
     # Get jobs with pagination
     offset = (page - 1) * per_page
     total_jobs = db.query(Job).count()
     print(f"Total jobs in database: {total_jobs}")
-    
+
     total_pages = (total_jobs + per_page - 1) // per_page
     print(f"Total pages: {total_pages} (per_page: {per_page})")
-    
+
     print(f"Loading page {page} with offset {offset}")
-    jobs = db.query(Job).order_by(desc(Job.telegram_message_date)).offset(offset).limit(per_page).all()
+    jobs = (
+        db.query(Job)
+        .order_by(desc(Job.telegram_message_date))
+        .offset(offset)
+        .limit(per_page)
+        .all()
+    )
     print(f"Retrieved {len(jobs)} jobs for current page")
-    
+
     # Print some details about the jobs
     for job in jobs:
-        print(f"Job ID: {job.job_id}, Title: {job.title}, Date: {job.telegram_message_date}")
-    
+        print(
+            f"Job ID: {job.job_id}, Title: {job.title}, Date: {job.telegram_message_date}"
+        )
+
     # Get channels
     channels = db.query(TelegramChannel).order_by(TelegramChannel.channel_name).all()
     print(f"Retrieved {len(channels)} channels")
-    
+
     # Generate page links
     page_links = []
     for p in range(max(1, page - 2), min(total_pages + 1, page + 3)):
-        page_links.append(f'<li class="page-item {"active" if p == page else ""}"><a class="page-link" href="/?page={p}">{p}</a></li>')
-    
+        page_links.append(
+            f'<li class="page-item {"active" if p == page else ""}"><a class="page-link" href="/?page={p}">{p}</a></li>'
+        )
+
     print("=== Dashboard Loading Complete ===\n")
-    
+
     # Generate job cards HTML
     job_cards = []
     for job in jobs:
         telegram_link = job.url
         job_date = job.telegram_message_date.strftime("%Y-%m-%d %H:%M:%S")
-        
+
         card_html = f"""
         <div class="card mb-4" id="job-{job.job_id}">
             <div class="card-header d-flex justify-content-between align-items-center">
@@ -197,7 +211,7 @@ async def root(
         </div>
         """
         job_cards.append(card_html)
-    
+
     return f"""
     <html>
         <head>
@@ -464,21 +478,22 @@ async def root(
     </html>
     """
 
+
 @app.get("/jobs/latest", response_model=List[JobResponse])
 async def get_latest_jobs(
     limit: int = Query(10, description="Number of jobs to return"),
     skip: int = Query(0, description="Number of jobs to skip"),
     channel: str = Query(None, description="Filter by Telegram channel"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """Get the latest scraped jobs"""
     query = db.query(Job).order_by(desc(Job.telegram_message_date))
-    
+
     if channel:
         query = query.filter(Job.telegram_channel_name == channel)
-    
+
     jobs = query.offset(skip).limit(limit).all()
-    
+
     return [
         JobResponse(
             id=job.job_id,
@@ -495,10 +510,11 @@ async def get_latest_jobs(
             telegram_channel=job.telegram_channel_name,
             telegram_message_date=job.telegram_message_date,
             telegram_views=job.telegram_views,
-            telegram_forwards=job.telegram_forwards
+            telegram_forwards=job.telegram_forwards,
         )
         for job in jobs
     ]
+
 
 @app.get("/jobs/channels/stats")
 async def get_channel_stats(db: Session = Depends(get_db)):
@@ -506,16 +522,28 @@ async def get_channel_stats(db: Session = Depends(get_db)):
     stats = []
     channels = db.query(TelegramChannel).all()
     for channel in channels:
-        count = db.query(Job).filter(Job.telegram_channel_name == channel.channel_name).count()
-        latest = db.query(Job).filter(Job.telegram_channel_name == channel.channel_name).order_by(desc(Job.telegram_message_date)).first()
-        stats.append({
-            "channel": channel.channel_name,
-            "is_active": channel.is_active,
-            "total_jobs": count,
-            "latest_job_date": latest.telegram_message_date if latest else None,
-            "last_scraped": channel.last_scraped
-        })
+        count = (
+            db.query(Job)
+            .filter(Job.telegram_channel_name == channel.channel_name)
+            .count()
+        )
+        latest = (
+            db.query(Job)
+            .filter(Job.telegram_channel_name == channel.channel_name)
+            .order_by(desc(Job.telegram_message_date))
+            .first()
+        )
+        stats.append(
+            {
+                "channel": channel.channel_name,
+                "is_active": channel.is_active,
+                "total_jobs": count,
+                "latest_job_date": latest.telegram_message_date if latest else None,
+                "last_scraped": channel.last_scraped,
+            }
+        )
     return stats
+
 
 @app.get("/jobs/search", response_model=List[JobResponse])
 async def search_jobs(
@@ -525,7 +553,7 @@ async def search_jobs(
     categories: List[str] = Query(None, description="Filter by job categories"),
     skip: int = Query(0, description="Number of records to skip"),
     limit: int = Query(20, description="Number of records to return"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """Search jobs with various filters"""
     jobs_query = db.query(Job)
@@ -533,22 +561,26 @@ async def search_jobs(
     if query:
         jobs_query = jobs_query.filter(
             or_(
-                Job.title.ilike(f"%{query}%"),
-                Job.telegram_raw_text.ilike(f"%{query}%")
+                Job.title.ilike(f"%{query}%"), Job.telegram_raw_text.ilike(f"%{query}%")
             )
         )
-    
+
     if channel:
         jobs_query = jobs_query.filter(Job.telegram_channel_name == channel)
-    
+
     if remote is not None:
         jobs_query = jobs_query.filter(Job.remote == remote)
-    
+
     if categories:
         jobs_query = jobs_query.filter(Job.categories.overlap(categories))
 
     total = jobs_query.count()
-    jobs = jobs_query.order_by(desc(Job.telegram_message_date)).offset(skip).limit(limit).all()
+    jobs = (
+        jobs_query.order_by(desc(Job.telegram_message_date))
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
     return [
         JobResponse(
@@ -566,10 +598,11 @@ async def search_jobs(
             telegram_channel=job.telegram_channel_name,
             telegram_message_date=job.telegram_message_date,
             telegram_views=job.telegram_views,
-            telegram_forwards=job.telegram_forwards
+            telegram_forwards=job.telegram_forwards,
         )
         for job in jobs
     ]
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -579,7 +612,7 @@ async def startup_event():
         print("Successfully initialized Gemini model")
     except Exception as e:
         print(f"Failed to load Gemini model: {e}")
-    
+
     try:
         telegram_client = TelegramJobClient()
         auth_success = await telegram_client.start()
@@ -592,10 +625,12 @@ async def startup_event():
     except Exception as e:
         print(f"Failed to initialize Telegram client: {e}")
 
+
 @app.on_event("shutdown")
 async def shutdown_event():
     if telegram_client:
         await telegram_client.stop()
+
 
 @app.get("/health")
 async def health_check():
@@ -605,20 +640,21 @@ async def health_check():
         "timestamp": datetime.utcnow().isoformat(),
         "services": {
             "ai": gemini_model is not None,
-            "telegram": telegram_client is not None
-        }
+            "telegram": telegram_client is not None,
+        },
     }
+
 
 @app.post("/ai/analyze")
 async def analyze_job(job_id: str, db: Session = Depends(get_db)):
     """Analyze a job posting using AI"""
     if gemini_model is None:
         raise HTTPException(status_code=503, detail="AI model not available")
-    
+
     job = db.query(Job).filter(Job.job_id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    
+
     try:
         prompt = f"""Analyze this job posting and provide key insights:
         Title: {job.title}
@@ -633,11 +669,12 @@ async def analyze_job(job_id: str, db: Session = Depends(get_db)):
         4. Company culture hints
         5. Red flags (if any)
         """
-        
+
         analysis = gemini_model.generate_text(prompt, max_length=1000)
         return {"analysis": analysis}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/jobs/stats")
 async def get_job_stats(db: Session = Depends(get_db)):
@@ -646,47 +683,49 @@ async def get_job_stats(db: Session = Depends(get_db)):
         total_jobs = db.query(Job).count()
         remote_jobs = db.query(Job).filter(Job.remote == True).count()
         with_salary = db.query(Job).filter(Job.salary_min.isnot(None)).count()
-        
+
         # Get category distribution
         category_stats = {}
         jobs_with_categories = db.query(Job).filter(Job.categories.isnot(None)).all()
         for job in jobs_with_categories:
-            for category in (job.categories or []):
+            for category in job.categories or []:
                 category_stats[category] = category_stats.get(category, 0) + 1
-        
+
         return {
             "total_jobs": total_jobs,
             "remote_jobs": remote_jobs,
             "jobs_with_salary": with_salary,
             "category_distribution": category_stats,
-            "last_update": datetime.utcnow().isoformat()
+            "last_update": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/jobs/scrape")
 async def trigger_scraping(
-    limit: int = Query(50, ge=1, le=1000),
-    db: Session = Depends(get_db)
+    limit: int = Query(50, ge=1, le=1000), db: Session = Depends(get_db)
 ):
     """Manually trigger job scraping from Telegram channels with custom limit"""
     print("\n=== Starting Manual Scraping Process ===")
     print(f"Requested message limit per channel: {limit}")
-    
+
     # Check Telegram client status
     if telegram_client is None:
         error_msg = "Telegram client not available"
         print(f"Error: {error_msg}")
         raise HTTPException(status_code=503, detail=error_msg)
-    
+
     try:
         # Check if client is authorized
         is_authorized = await telegram_client.client.is_user_authorized()
         if not is_authorized:
-            error_msg = "Telegram client not authorized. Please check authentication status."
+            error_msg = (
+                "Telegram client not authorized. Please check authentication status."
+            )
             print(f"Error: {error_msg}")
             raise HTTPException(status_code=503, detail=error_msg)
-        
+
         # Check if client is connected
         if not telegram_client.client.is_connected():
             error_msg = "Telegram client not connected. Attempting to reconnect..."
@@ -697,22 +736,24 @@ async def trigger_scraping(
                 error_msg = f"Failed to reconnect to Telegram: {str(e)}"
                 print(f"Error: {error_msg}")
                 raise HTTPException(status_code=503, detail=error_msg)
-        
+
         # Get active channels from database
-        active_channels = db.query(TelegramChannel).filter(TelegramChannel.is_active == True).all()
+        active_channels = (
+            db.query(TelegramChannel).filter(TelegramChannel.is_active == True).all()
+        )
         print(f"Found {len(active_channels)} active channels")
-        
+
         if not active_channels:
             print("Warning: No active channels configured")
             return {
-                "status": "warning", 
-                "message": "No active channels configured. Please add and activate channels first."
+                "status": "warning",
+                "message": "No active channels configured. Please add and activate channels first.",
             }
 
         # Get initial job count
         initial_count = db.query(Job).count()
         print(f"Initial job count: {initial_count}")
-        
+
         # Scrape each active channel
         scraped_channels = 0
         errors = []
@@ -729,7 +770,7 @@ async def trigger_scraping(
                 print(error_msg)
                 errors.append(error_msg)
                 continue
-        
+
         # Get final job count
         final_count = db.query(Job).count()
         new_jobs = final_count - initial_count
@@ -738,7 +779,7 @@ async def trigger_scraping(
         print(f"- Initial job count: {initial_count}")
         print(f"- Final job count: {final_count}")
         print(f"- New jobs added: {new_jobs}")
-        
+
         # Prepare response message
         if errors:
             status = "warning" if scraped_channels > 0 else "error"
@@ -746,15 +787,15 @@ async def trigger_scraping(
         else:
             status = "success"
             message = f"Successfully scraped {scraped_channels} channels. Added {new_jobs} new jobs."
-        
+
         return {
             "status": status,
             "message": message,
             "details": {
                 "channels_scraped": scraped_channels,
                 "new_jobs": new_jobs,
-                "errors": errors
-            }
+                "errors": errors,
+            },
         }
     except Exception as e:
         error_msg = f"Error during scraping process: {str(e)}"
@@ -763,12 +804,13 @@ async def trigger_scraping(
     finally:
         print("=== Manual Scraping Process Complete ===\n")
 
+
 @app.get("/jobs/channels")
 async def list_channels(db: Session = Depends(get_db)):
     """List all configured job channels"""
     if telegram_client is None:
         raise HTTPException(status_code=503, detail="Telegram client not available")
-    
+
     channels = db.query(TelegramChannel).all()
     return {
         "channels": [
@@ -776,23 +818,20 @@ async def list_channels(db: Session = Depends(get_db)):
                 "id": channel.id,
                 "name": channel.channel_name,
                 "is_active": channel.is_active,
-                "last_scraped": channel.last_scraped
+                "last_scraped": channel.last_scraped,
             }
             for channel in channels
         ],
-        "total": len(channels)
+        "total": len(channels),
     }
 
+
 @app.post("/channels/add")
-async def add_channel(
-    channel: dict,
-    db: Session = Depends(get_db)
-):
+async def add_channel(channel: dict, db: Session = Depends(get_db)):
     """Add a new Telegram channel"""
     try:
         new_channel = TelegramChannel(
-            channel_name=channel["channel_name"],
-            is_active=True
+            channel_name=channel["channel_name"], is_active=True
         )
         db.add(new_channel)
         db.commit()
@@ -801,19 +840,18 @@ async def add_channel(
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/channels/toggle/{channel_id}")
-async def toggle_channel(
-    channel_id: int,
-    db: Session = Depends(get_db)
-):
+async def toggle_channel(channel_id: int, db: Session = Depends(get_db)):
     """Toggle channel active status"""
     channel = db.query(TelegramChannel).filter(TelegramChannel.id == channel_id).first()
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
-    
+
     channel.is_active = not channel.is_active
     db.commit()
     return {"status": "success", "is_active": channel.is_active}
+
 
 @app.delete("/jobs/{job_id}")
 async def delete_job(job_id: str, db: Session = Depends(get_db)):
@@ -822,7 +860,7 @@ async def delete_job(job_id: str, db: Session = Depends(get_db)):
         job = db.query(Job).filter(Job.job_id == job_id).first()
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
-        
+
         db.delete(job)
         db.commit()
         return {"status": "success", "message": "Job deleted successfully"}
@@ -830,8 +868,10 @@ async def delete_job(job_id: str, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
+
 def start_server(host="0.0.0.0", port=8000):
     uvicorn.run(app, host=host, port=port)
+
 
 if __name__ == "__main__":
     start_server()

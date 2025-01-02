@@ -1,28 +1,36 @@
 FROM python:3.11-slim
 
-# Set working directory
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+
+# Set work directory
 WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
-    python3-dev \
-    libpq-dev \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first to leverage Docker cache
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY src/ ./src/
+# Copy project
+COPY . .
 
-# Create directory for Telegram session file
+# Create directory for Telegram sessions
 RUN mkdir -p /app/sessions
 
-# Set environment variables
-ENV PYTHONPATH=/app
-ENV PYTHONUNBUFFERED=1
+# Create directory for static files
+RUN mkdir -p /app/staticfiles
 
-# Run the application
-CMD ["python", "src/server.py"] 
+# Create directory for media files
+RUN mkdir -p /app/media
+
+# Expose port
+EXPOSE 8000
+
+# Command to run the application
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"] 
