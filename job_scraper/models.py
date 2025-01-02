@@ -1,5 +1,7 @@
 from django.db import models
 from django.utils import timezone
+from django.core.validators import FileExtensionValidator
+import os
 
 
 class TelegramChannel(models.Model):
@@ -11,6 +13,32 @@ class TelegramChannel(models.Model):
 
     def __str__(self):
         return self.channel_name
+
+
+class Resume(models.Model):
+    title = models.CharField(max_length=255)
+    file = models.FileField(
+        upload_to='resumes/',
+        validators=[FileExtensionValidator(allowed_extensions=['pdf'])]
+    )
+    description = models.TextField(blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.title
+
+    def delete(self, *args, **kwargs):
+        # Delete the file when the model instance is deleted
+        if self.file:
+            if os.path.isfile(self.file.path):
+                os.remove(self.file.path)
+        super().delete(*args, **kwargs)
+
+    class Meta:
+        ordering = ['-uploaded_at']
+        verbose_name = 'Resume'
+        verbose_name_plural = 'Resumes'
 
 
 class Job(models.Model):
@@ -42,6 +70,9 @@ class Job(models.Model):
     telegram_forwards = models.IntegerField(default=0)
     telegram_raw_text = models.TextField()
     telegram_metadata = models.JSONField(default=dict, blank=True)
+    
+    # Resume association
+    resume = models.ForeignKey(Resume, on_delete=models.SET_NULL, null=True, blank=True)
     
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)

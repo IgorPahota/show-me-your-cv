@@ -4,22 +4,42 @@ from django.http import HttpResponseRedirect
 from django.urls import path, reverse
 from django.template.response import TemplateResponse
 from django.utils import timezone
-from .models import Job, TelegramChannel
+from django.utils.html import format_html
+from .models import Job, TelegramChannel, Resume
 from telegram_client.client import TelegramClient
 from django.conf import settings
 from asgiref.sync import sync_to_async
 
 
+@admin.register(Resume)
+class ResumeAdmin(admin.ModelAdmin):
+    list_display = ('title', 'file_link', 'uploaded_at', 'updated_at')
+    search_fields = ('title', 'description')
+    readonly_fields = ('uploaded_at', 'updated_at')
+    ordering = ('-uploaded_at',)
+    
+    def file_link(self, obj):
+        if obj.file:
+            return format_html('<a href="{}" target="_blank">Download PDF</a>', obj.file.url)
+        return "No file"
+    file_link.short_description = 'Resume File'
+
+
 @admin.register(Job)
 class JobAdmin(admin.ModelAdmin):
-    list_display = ('title', 'company_name', 'location', 'remote', 'telegram_channel_name', 'telegram_message_date')
+    list_display = ('title', 'company_name', 'location', 'remote', 'telegram_channel_name', 'telegram_message_date', 'has_resume')
     list_filter = ('remote', 'telegram_channel_name', 'created_at')
     search_fields = ('title', 'company_name', 'location', 'description')
     ordering = ('-telegram_message_date',)
     readonly_fields = ('created_at', 'updated_at')
+    raw_id_fields = ('resume',)
     fieldsets = (
         ('Basic Info', {
             'fields': ('job_id', 'title', 'company_name', 'location', 'description', 'url', 'remote')
+        }),
+        ('Resume', {
+            'fields': ('resume',),
+            'description': 'Attach a resume to this job application'
         }),
         ('Salary Info', {
             'fields': ('salary_min', 'salary_max', 'currency')
@@ -38,6 +58,11 @@ class JobAdmin(admin.ModelAdmin):
             'fields': ('created_at', 'updated_at')
         }),
     )
+
+    def has_resume(self, obj):
+        return bool(obj.resume)
+    has_resume.boolean = True
+    has_resume.short_description = 'Has Resume'
 
 
 @sync_to_async
