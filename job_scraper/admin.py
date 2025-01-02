@@ -9,6 +9,9 @@ from .models import Job, TelegramChannel, Resume
 from telegram_client.client import TelegramClient
 from django.conf import settings
 from asgiref.sync import sync_to_async
+from django.core.files.base import ContentFile
+from src.services.gemini_service import GeminiService
+import uuid
 
 
 @admin.register(Resume)
@@ -33,6 +36,7 @@ class JobAdmin(admin.ModelAdmin):
     ordering = ('-telegram_message_date',)
     readonly_fields = ('created_at', 'updated_at')
     raw_id_fields = ('resume',)
+    actions = ['generate_resume']
     fieldsets = (
         ('Basic Info', {
             'fields': ('job_id', 'title', 'company_name', 'location', 'description', 'url', 'remote')
@@ -63,6 +67,56 @@ class JobAdmin(admin.ModelAdmin):
         return bool(obj.resume)
     has_resume.boolean = True
     has_resume.short_description = 'Has Resume'
+
+    def generate_resume(self, request, queryset):
+        if not settings.GEMINI_API_KEY:
+            messages.error(request, "Gemini API key is not configured. Please check your settings.")
+            return
+
+        gemini_service = GeminiService()
+        success_count = 0
+        error_count = 0
+
+        for job in queryset:
+            try:
+                # Generate resume text using Gemini
+                resume_text = gemini_service.generate_resume(job.description)
+                
+                # Convert text to PDF
+                pdf_bytes = gemini_service.create_pdf(resume_text)
+                
+                # Create a unique filename
+                filename = f"resume_{uuid.uuid4().hex[:8]}.pdf"
+                
+                # Truncate job title if it's too long (leave room for prefix)
+                truncated_title = job.title[:200] + "..." if len(job.title) > 200 else job.title
+                
+                # Create a new Resume object with truncated title
+                resume = Resume(
+                    title=f"AI Generated Resume for {truncated_title}",
+                    description=f"Automatically generated resume for job: {job.title}\nCompany: {job.company_name or 'Unknown Company'}\nLocation: {job.location or 'Not specified'}"
+                )
+                
+                # Save the PDF file
+                resume.file.save(filename, ContentFile(pdf_bytes), save=True)
+                
+                # Link the resume to the job
+                job.resume = resume
+                job.save()
+                
+                success_count += 1
+                messages.success(request, f"Successfully generated resume for: {truncated_title}")
+                
+            except Exception as e:
+                error_count += 1
+                messages.error(request, f"Error generating resume for {job.title[:100]}...: {str(e)}")
+        
+        if success_count:
+            messages.success(request, f"Successfully generated {success_count} resumes")
+        if error_count:
+            messages.warning(request, f"Failed to generate {error_count} resumes")
+            
+    generate_resume.short_description = "Generate AI resume for selected jobs"
 
 
 @sync_to_async
