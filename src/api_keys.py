@@ -6,7 +6,8 @@ TELEGRAM_API_HASH = os.getenv('TELEGRAM_API_HASH', '')
 
 # List of Telegram channels to monitor for jobs
 TELEGRAM_JOB_CHANNELS = [
-    '@jobs_in_it_remoute'
+    '@jobs_in_it_remoute',
+    '@dev_connectablejobs'
 ]
 
 # Gemini API key
