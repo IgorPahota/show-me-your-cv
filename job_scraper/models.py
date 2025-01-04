@@ -22,11 +22,12 @@ class Resume(models.Model):
         validators=[FileExtensionValidator(allowed_extensions=['pdf'])]
     )
     description = models.TextField(blank=True)
+    is_template = models.BooleanField(default=False, help_text="Mark this resume as a template for generating other resumes")
     uploaded_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return self.title
+        return f"{self.title} {'(Template)' if self.is_template else ''}"
 
     def delete(self, *args, **kwargs):
         # Delete the file when the model instance is deleted

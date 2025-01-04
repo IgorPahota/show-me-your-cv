@@ -16,7 +16,8 @@ import uuid
 
 @admin.register(Resume)
 class ResumeAdmin(admin.ModelAdmin):
-    list_display = ('title', 'file_link', 'uploaded_at', 'updated_at')
+    list_display = ('title', 'is_template', 'file_link', 'uploaded_at', 'updated_at')
+    list_filter = ('is_template', 'uploaded_at')
     search_fields = ('title', 'description')
     readonly_fields = ('uploaded_at', 'updated_at')
     ordering = ('-uploaded_at',)
@@ -67,6 +68,73 @@ class JobAdmin(admin.ModelAdmin):
         return bool(obj.resume)
     has_resume.boolean = True
     has_resume.short_description = 'Has Resume'
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        # Add dynamic actions for each template resume
+        template_resumes = Resume.objects.filter(is_template=True)
+        for template in template_resumes:
+            action_name = f'generate_resume_from_template_{template.id}'
+            action_function = self._create_template_action(template)
+            actions[action_name] = (
+                action_function,
+                action_name,
+                f'Generate resume using template: {template.title}'
+            )
+        return actions
+
+    def _create_template_action(self, template_resume):
+        def generate_resume_from_template(modeladmin, request, queryset):
+            if not settings.GEMINI_API_KEY:
+                messages.error(request, "Gemini API key is not configured. Please check your settings.")
+                return
+
+            gemini_service = GeminiService()
+            success_count = 0
+            error_count = 0
+
+            for job in queryset:
+                try:
+                    # Pass the file object directly to the service
+                    template_resume.file.seek(0)  # Reset file pointer to beginning
+                    resume_text = gemini_service.adapt_template_resume(template_resume.file, job.description)
+                    
+                    # Convert text to PDF
+                    pdf_bytes = gemini_service.create_pdf(resume_text)
+                    
+                    # Create a unique filename
+                    filename = f"resume_{uuid.uuid4().hex[:8]}.pdf"
+                    
+                    # Truncate job title if it's too long
+                    truncated_title = job.title[:200] + "..." if len(job.title) > 200 else job.title
+                    
+                    # Create a new Resume object
+                    resume = Resume(
+                        title=f"Modified Resume for {truncated_title} (Based on {template_resume.title})",
+                        description=f"Modified from template: {template_resume.title}\nJob: {job.title}\nCompany: {job.company_name or 'Unknown Company'}"
+                    )
+                    
+                    # Save the PDF file
+                    resume.file.save(filename, ContentFile(pdf_bytes), save=True)
+                    
+                    # Link the resume to the job
+                    job.resume = resume
+                    job.save()
+                    
+                    success_count += 1
+                    messages.success(request, f"Successfully generated modified resume for: {truncated_title}")
+                    
+                except Exception as e:
+                    error_count += 1
+                    messages.error(request, f"Error generating resume for {job.title[:100]}...: {str(e)}")
+            
+            if success_count:
+                messages.success(request, f"Successfully generated {success_count} resumes")
+            if error_count:
+                messages.warning(request, f"Failed to generate {error_count} resumes")
+
+        generate_resume_from_template.short_description = f'Generate resume using template: {template_resume.title}'
+        return generate_resume_from_template
 
     def generate_resume(self, request, queryset):
         if not settings.GEMINI_API_KEY:

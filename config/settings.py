@@ -87,14 +87,7 @@ ASGI_APPLICATION = 'config.asgi.application'
 
 # Database
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'jobs_db',
-        'USER': 'postgres',
-        'PASSWORD': 'postgres',
-        'HOST': 'db',
-        'PORT': '5432',
-    }
+    'default': env.db('DATABASE_URL', default='postgresql://postgres:postgres@localhost:5432/jobs_db')
 }
 
 # Password validation

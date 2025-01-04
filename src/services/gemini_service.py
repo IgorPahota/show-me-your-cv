@@ -7,11 +7,27 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph
 from reportlab.lib.units import inch
 import io
 import textwrap
+import PyPDF2
 
 class GeminiService:
     def __init__(self):
         genai.configure(api_key=settings.GEMINI_API_KEY)
         self.model = genai.GenerativeModel('gemini-pro')
+
+    def extract_text_from_pdf(self, pdf_file):
+        """Extract text content from a PDF file."""
+        try:
+            # Create a PDF reader object
+            pdf_reader = PyPDF2.PdfReader(pdf_file)
+            
+            # Extract text from all pages
+            text = ""
+            for page in pdf_reader.pages:
+                text += page.extract_text() + "\n"
+            
+            return text
+        except Exception as e:
+            raise Exception(f"Failed to extract text from PDF: {str(e)}")
 
     def generate_resume(self, job_description):
         """Generate a resume based on the job description."""
@@ -36,6 +52,37 @@ class GeminiService:
             return resume_text
         except Exception as e:
             raise Exception(f"Failed to generate resume: {str(e)}")
+
+    def adapt_template_resume(self, template_file, job_description):
+        """Adapt an existing resume template for a specific job."""
+        try:
+            # Extract text from the PDF template
+            template_text = self.extract_text_from_pdf(template_file)
+            
+            prompt = f"""
+            I have a base resume template and a job description. Please modify the resume to better match the job requirements.
+            Make minimal necessary changes to align the resume with the job while maintaining its basic structure and authenticity.
+
+            Base Resume Template:
+            {template_text}
+
+            Job Description:
+            {job_description}
+
+            Please provide the modified resume, keeping the same format but adjusting:
+            1. Professional Summary - to better match the job focus
+            2. Key Skills - emphasize relevant skills for this position
+            3. Work Experience - adjust descriptions to highlight relevant experience
+            4. Other sections - make minimal adjustments if needed
+
+            Keep most of the original content, only modify what's necessary to better match the job requirements.
+            """
+
+            response = self.model.generate_content(prompt)
+            modified_resume = response.text
+            return modified_resume
+        except Exception as e:
+            raise Exception(f"Failed to adapt resume template: {str(e)}")
 
     def create_pdf(self, resume_text):
         """Convert the resume text to a PDF file."""
