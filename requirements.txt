@@ -2,7 +2,7 @@ Django>=4.2.0,<5.0
 python-telegram-bot==20.7
 telethon>=1.33.1
 psycopg2-binary>=2.9.9
-google-generativeai>=0.3.1
+google-generativeai>=0.4.0
 python-dotenv>=1.0.0
 django-environ==0.11.2
 django-crispy-forms>=2.1
@@ -16,3 +16,5 @@ daphne>=4.0.0
 nest-asyncio>=1.6.0
 reportlab>=4.0.8
 PyPDF2>=3.0.1
+PyMuPDF==1.23.8
+pylatex>=1.4.1

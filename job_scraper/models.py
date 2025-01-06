@@ -19,7 +19,7 @@ class Resume(models.Model):
     title = models.CharField(max_length=255)
     file = models.FileField(
         upload_to='resumes/',
-        validators=[FileExtensionValidator(allowed_extensions=['pdf'])]
+        validators=[FileExtensionValidator(allowed_extensions=['pdf', 'tex'])]
     )
     description = models.TextField(blank=True)
     is_template = models.BooleanField(default=False, help_text="Mark this resume as a template for generating other resumes")

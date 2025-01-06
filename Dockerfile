@@ -11,6 +11,10 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     gcc \
     postgresql-client \
+    texlive-latex-base \
+    texlive-fonts-recommended \
+    texlive-fonts-extra \
+    texlive-latex-extra \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies

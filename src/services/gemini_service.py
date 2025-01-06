@@ -1,128 +1,106 @@
 import google.generativeai as genai
 from django.conf import settings
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph
-from reportlab.lib.units import inch
-import io
-import textwrap
-import PyPDF2
+import logging
+
+logger = logging.getLogger(__name__)
 
 class GeminiService:
     def __init__(self):
         genai.configure(api_key=settings.GEMINI_API_KEY)
-        self.model = genai.GenerativeModel('gemini-pro')
-
-    def extract_text_from_pdf(self, pdf_file):
-        """Extract text content from a PDF file."""
-        try:
-            # Create a PDF reader object
-            pdf_reader = PyPDF2.PdfReader(pdf_file)
-            
-            # Extract text from all pages
-            text = ""
-            for page in pdf_reader.pages:
-                text += page.extract_text() + "\n"
-            
-            return text
-        except Exception as e:
-            raise Exception(f"Failed to extract text from PDF: {str(e)}")
-
-    def generate_resume(self, job_description):
-        """Generate a resume based on the job description."""
-        prompt = f"""
-        Create a professional resume tailored for the following job description:
-        {job_description}
-
-        Format the resume with the following sections:
-        1. Professional Summary
-        2. Key Skills
-        3. Work Experience (create 2-3 relevant positions)
-        4. Education
-        5. Certifications (if relevant)
-
-        Make sure the experience and skills align perfectly with the job requirements.
-        Keep it professional and realistic.
-        """
-
-        try:
-            response = self.model.generate_content(prompt)
-            resume_text = response.text
-            return resume_text
-        except Exception as e:
-            raise Exception(f"Failed to generate resume: {str(e)}")
+        self.model = genai.GenerativeModel('gemini-1.5-flash')
 
     def adapt_template_resume(self, template_file, job_description):
-        """Adapt an existing resume template for a specific job."""
+        """Adapt LaTeX resume template for a specific job."""
         try:
-            # Extract text from the PDF template
-            template_text = self.extract_text_from_pdf(template_file)
+            logger.info("Starting adapt_template_resume")
             
-            prompt = f"""
-            I have a base resume template and a job description. Please modify the resume to better match the job requirements.
-            Make minimal necessary changes to align the resume with the job while maintaining its basic structure and authenticity.
+            if not template_file:
+                logger.error("No template file provided")
+                raise Exception("No template file provided")
+            if not job_description:
+                logger.error("No job description provided")
+                raise Exception("No job description provided")
 
-            Base Resume Template:
-            {template_text}
+            # Read the LaTeX template
+            logger.info("Reading template file")
+            template_file.seek(0)
+            latex_template = template_file.read().decode('utf-8')
+            logger.info(f"Template content length: {len(latex_template)}")
+            
+            if not latex_template.strip():
+                logger.error("Template file is empty")
+                raise Exception("Template file is empty")
+            
+            logger.info("Creating prompt")
+            prompt = f"""You are a professional resume editor. Your task is to adapt this LaTeX resume for a specific job.
 
             Job Description:
             {job_description}
 
-            Please provide the modified resume, keeping the same format but adjusting:
-            1. Professional Summary - to better match the job focus
-            2. Key Skills - emphasize relevant skills for this position
-            3. Work Experience - adjust descriptions to highlight relevant experience
-            4. Other sections - make minimal adjustments if needed
+            Current Resume Template (in LaTeX):
+            {latex_template}
 
-            Keep most of the original content, only modify what's necessary to better match the job requirements.
-            """
+            Instructions:
+            1. Keep the EXACT same LaTeX preamble (documentclass, packages, etc.) from the template
+            2. Keep the EXACT same document structure and environments
+            3. Only modify the content inside sections to match the job requirements
+            4. Do not change any formatting commands or document settings
+            5. Ensure all LaTeX environments remain properly closed
+            6. Return the COMPLETE LaTeX document
 
-            response = self.model.generate_content(prompt)
-            modified_resume = response.text
-            return modified_resume
+            IMPORTANT:
+            - Copy and use the EXACT same \\\\documentclass line from the template
+            - Copy and use ALL the same \\\\usepackage commands from the template
+            - Keep ALL the same formatting definitions from the template
+            - Maintain the EXACT same document structure
+            - End with \\\\end{{document}}
+            - Do not add any explanations or markdown formatting
+            - Return ONLY the LaTeX code
+
+            If you cannot generate a valid response, return an error message starting with 'ERROR:'."""
+
+            logger.info("Calling LLM")
+            response = self.model.generate_content(
+                prompt,
+                generation_config={
+                    "temperature": 0.1,  # Lower temperature for more precise copying
+                    "candidate_count": 1,
+                    "max_output_tokens": 2048,
+                    "top_p": 0.8,
+                    "top_k": 40,
+                }
+            )
+            logger.info("Got response from LLM")
+            
+            if not response or not response.candidates:
+                logger.error("No response generated from LLM")
+                raise Exception("No response generated from LLM")
+                
+            if not response.candidates[0].content or not response.candidates[0].content.parts:
+                logger.error("Empty response from LLM")
+                raise Exception("Empty response from LLM")
+            
+            latex_content = response.candidates[0].content.parts[0].text.strip()
+            logger.info(f"Generated content length: {len(latex_content)}")
+            
+            if not latex_content:
+                logger.error("Generated LaTeX content is empty")
+                raise Exception("Generated LaTeX content is empty")
+                
+            if latex_content.startswith('ERROR:'):
+                logger.error(f"LLM returned error: {latex_content}")
+                raise Exception(latex_content[6:].strip())
+            
+            # Remove any markdown code block indicators
+            latex_content = latex_content.replace('```latex', '').replace('```', '').strip()
+            logger.info("Successfully generated LaTeX content")
+            
+            return latex_content
+                    
         except Exception as e:
+            logger.error(f"Error in adapt_template_resume: {str(e)}")
             raise Exception(f"Failed to adapt resume template: {str(e)}")
 
     def create_pdf(self, resume_text):
-        """Convert the resume text to a PDF file."""
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=letter,
-                              rightMargin=72, leftMargin=72,
-                              topMargin=72, bottomMargin=72)
-
-        styles = getSampleStyleSheet()
-        story = []
-
-        # Custom style for sections
-        section_style = ParagraphStyle(
-            'SectionStyle',
-            parent=styles['Heading1'],
-            fontSize=14,
-            spaceAfter=12
-        )
-
-        # Custom style for content
-        content_style = ParagraphStyle(
-            'ContentStyle',
-            parent=styles['Normal'],
-            fontSize=11,
-            spaceAfter=6
-        )
-
-        # Split the text into sections and format
-        sections = resume_text.split('\n\n')
-        for section in sections:
-            if section.strip():
-                # Check if it's a section header
-                if any(section.strip().startswith(header) for header in 
-                      ['Professional Summary', 'Key Skills', 'Work Experience', 'Education', 'Certifications']):
-                    p = Paragraph(section, section_style)
-                else:
-                    p = Paragraph(section, content_style)
-                story.append(p)
-
-        doc.build(story)
-        pdf_bytes = buffer.getvalue()
-        buffer.close()
-        return pdf_bytes 
+        """Legacy method - kept for backward compatibility."""
+        pass 

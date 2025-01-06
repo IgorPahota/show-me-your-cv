@@ -12,6 +12,7 @@ from asgiref.sync import sync_to_async
 from django.core.files.base import ContentFile
 from src.services.gemini_service import GeminiService
 import uuid
+import logging
 
 
 @admin.register(Resume)
@@ -85,7 +86,11 @@ class JobAdmin(admin.ModelAdmin):
 
     def _create_template_action(self, template_resume):
         def generate_resume_from_template(modeladmin, request, queryset):
+            logger = logging.getLogger(__name__)
+            logger.info(f"Starting resume generation with template: {template_resume.title}")
+
             if not settings.GEMINI_API_KEY:
+                logger.error("Gemini API key not configured")
                 messages.error(request, "Gemini API key is not configured. Please check your settings.")
                 return
 
@@ -95,44 +100,66 @@ class JobAdmin(admin.ModelAdmin):
 
             for job in queryset:
                 try:
+                    logger.info(f"Processing job: {job.title}")
+                    
+                    # Check template file
+                    if not template_resume.file:
+                        logger.error("Template file is missing")
+                        raise Exception("Template file is missing")
+                        
+                    # Log template file info
+                    logger.info(f"Template file: {template_resume.file.name}")
+                    logger.info(f"Template file size: {template_resume.file.size}")
+                    
                     # Pass the file object directly to the service
                     template_resume.file.seek(0)  # Reset file pointer to beginning
-                    resume_text = gemini_service.adapt_template_resume(template_resume.file, job.description)
+                    logger.info("Calling adapt_template_resume")
+                    latex_content = gemini_service.adapt_template_resume(template_resume.file, job.description)
                     
-                    # Convert text to PDF
-                    pdf_bytes = gemini_service.create_pdf(resume_text)
+                    if not latex_content:
+                        logger.error("No content generated")
+                        raise Exception("No content generated")
                     
-                    # Create a unique filename
-                    filename = f"resume_{uuid.uuid4().hex[:8]}.pdf"
+                    logger.info(f"Generated LaTeX content length: {len(latex_content)}")
+                    
+                    # Create unique filename for LaTeX
+                    unique_id = uuid.uuid4().hex[:8]
+                    latex_filename = f"resume_{unique_id}.tex"
+                    logger.info(f"Generated filename: {latex_filename}")
                     
                     # Truncate job title if it's too long
                     truncated_title = job.title[:200] + "..." if len(job.title) > 200 else job.title
                     
-                    # Create a new Resume object
+                    # Create a new Resume object for the LaTeX
                     resume = Resume(
                         title=f"Modified Resume for {truncated_title} (Based on {template_resume.title})",
                         description=f"Modified from template: {template_resume.title}\nJob: {job.title}\nCompany: {job.company_name or 'Unknown Company'}"
                     )
                     
-                    # Save the PDF file
-                    resume.file.save(filename, ContentFile(pdf_bytes), save=True)
+                    # Save the LaTeX file
+                    logger.info("Saving LaTeX file")
+                    resume.file.save(latex_filename, ContentFile(latex_content.encode('utf-8')), save=True)
                     
                     # Link the resume to the job
                     job.resume = resume
                     job.save()
+                    logger.info("Successfully saved resume and linked to job")
                     
                     success_count += 1
                     messages.success(request, f"Successfully generated modified resume for: {truncated_title}")
                     
                 except Exception as e:
+                    logger.error(f"Error processing job {job.title}: {str(e)}")
                     error_count += 1
                     messages.error(request, f"Error generating resume for {job.title[:100]}...: {str(e)}")
             
             if success_count:
+                logger.info(f"Successfully generated {success_count} resumes")
                 messages.success(request, f"Successfully generated {success_count} resumes")
             if error_count:
+                logger.warning(f"Failed to generate {error_count} resumes")
                 messages.warning(request, f"Failed to generate {error_count} resumes")
-
+                    
         generate_resume_from_template.short_description = f'Generate resume using template: {template_resume.title}'
         return generate_resume_from_template
 
