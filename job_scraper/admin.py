@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib import messages
-from django.http import HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseRedirect
 from django.urls import path, reverse
 from django.template.response import TemplateResponse
 from django.utils import timezone
@@ -13,21 +13,83 @@ from django.core.files.base import ContentFile
 from src.services.gemini_service import GeminiService
 import uuid
 import logging
+import tempfile
+import subprocess
+import os
 
 
 @admin.register(Resume)
 class ResumeAdmin(admin.ModelAdmin):
-    list_display = ('title', 'is_template', 'file_link', 'uploaded_at', 'updated_at')
+    list_display = ('title', 'is_template', 'file_links', 'uploaded_at', 'updated_at')
     list_filter = ('is_template', 'uploaded_at')
     search_fields = ('title', 'description')
     readonly_fields = ('uploaded_at', 'updated_at')
     ordering = ('-uploaded_at',)
     
-    def file_link(self, obj):
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                '<int:resume_id>/download-pdf/',
+                self.admin_site.admin_view(self.download_pdf_view),
+                name='resume-download-pdf',
+            ),
+        ]
+        return custom_urls + urls
+    
+    def file_links(self, obj):
         if obj.file:
-            return format_html('<a href="{}" target="_blank">Download PDF</a>', obj.file.url)
+            latex_link = format_html('<a href="{}" target="_blank">Download LaTeX</a>', obj.file.url)
+            pdf_link = format_html(
+                '<a href="{}" target="_blank">Download PDF</a>',
+                reverse('admin:resume-download-pdf', args=[obj.pk])
+            )
+            return format_html('{} | {}', latex_link, pdf_link)
         return "No file"
-    file_link.short_description = 'Resume File'
+    file_links.short_description = 'Resume Files'
+
+    def download_pdf_view(self, request, resume_id):
+        try:
+            resume = Resume.objects.get(pk=resume_id)
+            
+            # Read LaTeX content
+            resume.file.seek(0)
+            latex_content = resume.file.read().decode('utf-8')
+            
+            # Create temporary directory for LaTeX compilation
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # Write LaTeX content to file
+                tex_path = os.path.join(temp_dir, 'resume.tex')
+                with open(tex_path, 'w', encoding='utf-8') as f:
+                    f.write(latex_content)
+                
+                # Run pdflatex twice to resolve references
+                for _ in range(2):
+                    result = subprocess.run(
+                        ['pdflatex', '-interaction=nonstopmode', 'resume.tex'],
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                        cwd=temp_dir
+                    )
+                
+                # Read the generated PDF
+                pdf_path = os.path.join(temp_dir, 'resume.pdf')
+                with open(pdf_path, 'rb') as pdf_file:
+                    response = HttpResponse(pdf_file.read(), content_type='application/pdf')
+                    # Change to inline to display in browser
+                    response['Content-Disposition'] = f'inline; filename="{os.path.basename(resume.file.name).replace(".tex", ".pdf")}"'
+                    return response
+                    
+        except Resume.DoesNotExist:
+            messages.error(request, "Resume not found.")
+            return HttpResponseRedirect(reverse('admin:job_scraper_resume_changelist'))
+        except subprocess.CalledProcessError as e:
+            messages.error(request, f"Failed to compile LaTeX: {e.stderr}")
+            return HttpResponseRedirect(reverse('admin:job_scraper_resume_changelist'))
+        except Exception as e:
+            messages.error(request, f"Error generating PDF: {str(e)}")
+            return HttpResponseRedirect(reverse('admin:job_scraper_resume_changelist'))
 
 
 @admin.register(Job)
