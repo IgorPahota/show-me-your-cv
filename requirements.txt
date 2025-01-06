@@ -14,7 +14,3 @@ django-celery-results>=2.5.1
 channels>=4.0.0
 daphne>=4.0.0
 nest-asyncio>=1.6.0
-reportlab>=4.0.8
-PyPDF2>=3.0.1
-PyMuPDF==1.23.8
-pylatex>=1.4.1

@@ -276,8 +276,8 @@ class JobAdmin(admin.ModelAdmin):
     generate_resume.short_description = "Generate AI resume for selected jobs"
 
 
-@sync_to_async
 def update_channel_last_scraped(channel):
+    """Update the last_scraped timestamp for a channel"""
     channel.last_scraped = timezone.now()
     channel.save()
 
@@ -357,7 +357,7 @@ class TelegramChannelAdmin(admin.ModelAdmin):
                 try:
                     new_jobs = client.scrape_channel(channel.channel_name)
                     success_count += new_jobs
-                    sync_to_async(update_channel_last_scraped)(channel)
+                    update_channel_last_scraped(channel)
                     messages.success(request, f"Successfully scraped {new_jobs} new jobs from {channel.channel_name}")
                 except ValueError as ve:
                     if "authentication required" in str(ve).lower():
