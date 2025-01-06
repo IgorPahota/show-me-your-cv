@@ -1,0 +1,46 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrastyle %}{{ block.super }}
+<style>
+    .verify-form {
+        max-width: 400px;
+        margin: 2em auto;
+        padding: 2em;
+        background: white;
+        border-radius: 4px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .verify-form input[type="text"] {
+        width: 100%;
+        padding: 0.5em;
+        margin: 0.5em 0;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+    }
+    .verify-form button {
+        background: var(--primary);
+        color: white;
+        border: none;
+        padding: 0.5em 1em;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+    .verify-form button:hover {
+        background: var(--primary-darker);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="verify-form">
+    <h2>{% trans "Telegram Verification" %}</h2>
+    <p>{% trans "Please enter the verification code sent to your Telegram account:" %}</p>
+    
+    <form method="post">
+        {% csrf_token %}
+        <input type="text" name="code" placeholder="Enter verification code" required>
+        <button type="submit">{% trans "Verify" %}</button>
+    </form>
+</div>
+{% endblock %} 

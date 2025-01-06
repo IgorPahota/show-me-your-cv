@@ -3,34 +3,37 @@ from transformers import AutoTokenizer
 from transformers.models.paligemma import PaliGemmaForConditionalGeneration
 import os
 
+
 class PaLiGemmaModel:
     def __init__(self):
         """
         Initialize PaLiGemma model using local files
         """
         current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        model_path = os.path.join(current_dir, "models", "paligemma-2-transformers-paligemma2-3b-pt-224-v1")
-        
+        model_path = os.path.join(
+            current_dir, "models", "paligemma-2-transformers-paligemma2-3b-pt-224-v1"
+        )
+
         print(f"Loading model from: {model_path}")
-        self.device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+        self.device = torch.device(
+            "mps" if torch.backends.mps.is_available() else "cpu"
+        )
         print(f"Using device: {self.device}")
-        
+
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(
                 model_path,
                 local_files_only=True,
                 trust_remote_code=True,
-                model_max_length=512
+                model_max_length=512,
             )
-            
+
             self.model = PaliGemmaForConditionalGeneration.from_pretrained(
-                model_path,
-                torch_dtype=torch.bfloat16,
-                local_files_only=True
+                model_path, torch_dtype=torch.bfloat16, local_files_only=True
             ).to(self.device)
-            
+
             print("PaLiGemma model loaded successfully!")
-            
+
         except Exception as e:
             print(f"Error loading PaLiGemma model: {e}")
             raise
@@ -45,9 +48,9 @@ class PaLiGemmaModel:
                 return_tensors="pt",
                 padding=True,
                 truncation=True,
-                max_length=512
+                max_length=512,
             ).to(self.device)
-            
+
             outputs = self.model.generate(
                 **inputs,
                 max_new_tokens=max_length,
@@ -56,9 +59,9 @@ class PaLiGemmaModel:
                 do_sample=True,
                 pad_token_id=self.tokenizer.pad_token_id,
                 bos_token_id=2,
-                eos_token_id=1
+                eos_token_id=1,
             )
-            
+
             return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
         except Exception as e:
             print(f"Error generating text: {e}")
