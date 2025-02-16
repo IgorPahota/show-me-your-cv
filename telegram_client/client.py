@@ -9,6 +9,7 @@ from django.conf import settings
 from job_scraper.models import Job
 from django.utils import timezone
 from asgiref.sync import sync_to_async
+from src.services.gemini_service import GeminiService
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,7 @@ class TelegramClient:
     _loop = None
     _needs_verification = False
     _is_connected = False
+    _gemini_service = None
     
     def __new__(cls):
         if cls._instance is None:
@@ -44,6 +46,7 @@ class TelegramClient:
                     settings.TELEGRAM_API_HASH,
                     loop=self._loop
                 )
+                self._gemini_service = GeminiService()
                 self._initialized = True
                 try:
                     self._run_async(self._connect())
@@ -73,6 +76,33 @@ class TelegramClient:
             logger.info(f"Processing job post: {job_id}")
             logger.info(f"Message content: {message['text'][:100]}...")  # Log first 100 chars
             
+            # Extract job information using Gemini
+            prompt = f"""Extract the following information from this job posting. Return a JSON object with these fields:
+            - company_name: The name of the company (null if not found)
+            - location: Work location or office location (null if not found)
+            - recruiter_contact: Any contact information for the recruiter/HR (email, telegram username, phone, etc.) (null if not found)
+
+            Focus on finding:
+            1. Company name - look for phrases like "company:", "at", "with", or company names followed by common suffixes (Inc, LLC, Ltd)
+            2. Location - look for city names, country names, or phrases like "location:", "based in", "office in"
+            3. Recruiter contact - look for:
+               - Telegram usernames (starting with @)
+               - Email addresses
+               - Phone numbers
+               - Links to contact forms or profiles
+               - Phrases like "contact", "apply", "send CV to", "HR"
+
+            Job Posting:
+            {message['text']}
+            """
+            
+            try:
+                extracted_data = await sync_to_async(self._gemini_service.extract_job_info)(prompt)
+                logger.info(f"Successfully extracted job data using Gemini for job {job_id}")
+            except Exception as e:
+                logger.error(f"Failed to extract job data using Gemini: {str(e)}")
+                extracted_data = {}
+            
             defaults = {
                 'title': message['text'][:255],
                 'description': message['text'],
@@ -83,7 +113,12 @@ class TelegramClient:
                 'telegram_views': message['views'],
                 'telegram_forwards': message['forwards'],
                 'telegram_raw_text': message['text'],
-                'url': f"https://t.me/{clean_channel_name}/{message['id']}"
+                'url': f"https://t.me/{clean_channel_name}/{message['id']}",
+                'processed_by_llm': bool(extracted_data),
+                'extracted_data': extracted_data,
+                'company_name': extracted_data.get('company_name'),
+                'location': extracted_data.get('location'),
+                'recruiter_contact': extracted_data.get('recruiter_contact'),
             }
             
             logger.info(f"Attempting to create/update job with ID: {job_id}")

@@ -94,36 +94,62 @@ class ResumeAdmin(admin.ModelAdmin):
 
 @admin.register(Job)
 class JobAdmin(admin.ModelAdmin):
-    list_display = ('title', 'company_name', 'location', 'remote', 'telegram_channel_name', 'telegram_message_date', 'has_resume')
-    list_filter = ('remote', 'telegram_channel_name', 'created_at')
-    search_fields = ('title', 'company_name', 'location', 'description')
+    list_display = ('title', 'company_name', 'location', 'recruiter_contact', 'telegram_channel_name', 'telegram_message_date', 'has_resume')
+    list_filter = ('telegram_channel_name', 'created_at', 'processed_by_llm')
+    search_fields = ('title', 'company_name', 'location', 'description', 'recruiter_contact')
     ordering = ('-telegram_message_date',)
-    readonly_fields = ('created_at', 'updated_at')
+    readonly_fields = ('created_at', 'updated_at', 'processed_by_llm')
     raw_id_fields = ('resume',)
     actions = ['generate_resume']
+    
     fieldsets = (
-        ('Basic Info', {
-            'fields': ('job_id', 'title', 'company_name', 'location', 'description', 'url', 'remote')
+        ('Main Information', {
+            'fields': (
+                'title',
+                'company_name',
+                'location',
+                'recruiter_contact',
+                'description',
+                'url',
+            ),
+            'classes': ('wide',)
+        }),
+        ('Job Details', {
+            'fields': (
+                'remote',
+                'salary_min',
+                'salary_max',
+                'currency',
+                'categories',
+            ),
+            'classes': ('collapse',)
+        }),
+        ('Telegram Information', {
+            'fields': (
+                'telegram_channel_name',
+                'telegram_message_id',
+                'telegram_channel_id',
+                'telegram_message_date',
+                'telegram_views',
+                'telegram_forwards',
+                'telegram_raw_text',
+                'telegram_metadata',
+            ),
+            'classes': ('collapse',)
         }),
         ('Resume', {
             'fields': ('resume',),
-            'description': 'Attach a resume to this job application'
+            'classes': ('collapse',)
         }),
-        ('Salary Info', {
-            'fields': ('salary_min', 'salary_max', 'currency')
-        }),
-        ('Categories', {
-            'fields': ('categories',)
-        }),
-        ('Telegram Metadata', {
+        ('System Information', {
             'fields': (
-                'telegram_message_id', 'telegram_channel_id', 'telegram_channel_name',
-                'telegram_message_date', 'telegram_views', 'telegram_forwards',
-                'telegram_raw_text', 'telegram_metadata'
-            )
-        }),
-        ('Timestamps', {
-            'fields': ('created_at', 'updated_at')
+                'job_id',
+                'processed_by_llm',
+                'extracted_data',
+                'created_at',
+                'updated_at'
+            ),
+            'classes': ('collapse',)
         }),
     )
 
@@ -289,7 +315,7 @@ class TelegramChannelAdmin(admin.ModelAdmin):
     search_fields = ('channel_name',)
     ordering = ('channel_name',)
     readonly_fields = ('created_at', 'updated_at', 'last_scraped')
-    actions = ['scrape_jobs']
+    actions = ['scrape_jobs', 'process_unprocessed_jobs']
     fieldsets = (
         (None, {
             'fields': ('channel_name', 'is_active', 'last_scraped')
@@ -334,10 +360,6 @@ class TelegramChannelAdmin(admin.ModelAdmin):
         return TemplateResponse(request, 'admin/verify_telegram.html', context)
 
     def scrape_jobs(self, request, queryset):
-        if not all([settings.TELEGRAM_API_ID, settings.TELEGRAM_API_HASH, settings.TELEGRAM_PHONE]):
-            messages.error(request, "Telegram credentials are not properly configured. Please check your settings.")
-            return
-
         try:
             client = TelegramClient()
             
@@ -348,6 +370,7 @@ class TelegramChannelAdmin(admin.ModelAdmin):
             
             success_count = 0
             error_count = 0
+            new_jobs_ids = []  # Track newly scraped jobs
             
             for channel in queryset:
                 if not channel.is_active:
@@ -356,25 +379,116 @@ class TelegramChannelAdmin(admin.ModelAdmin):
                 
                 try:
                     new_jobs = client.scrape_channel(channel.channel_name)
+                    # Get IDs of newly scraped jobs
+                    new_jobs_ids.extend(Job.objects.filter(
+                        telegram_channel_name=channel.channel_name,
+                        processed_by_llm=False
+                    ).values_list('id', flat=True))
+                    
                     success_count += new_jobs
                     update_channel_last_scraped(channel)
                     messages.success(request, f"Successfully scraped {new_jobs} new jobs from {channel.channel_name}")
-                except ValueError as ve:
-                    if "authentication required" in str(ve).lower():
-                        return HttpResponseRedirect(
-                            reverse('admin:job_scraper_telegramchannel_verify')
-                        )
-                    messages.error(request, f"Error with channel {channel.channel_name}: {str(ve)}")
                 except Exception as e:
                     error_count += 1
                     messages.error(request, f"Error scraping {channel.channel_name}: {str(e)}")
             
-            if success_count:
-                messages.success(request, f"Successfully scraped {success_count} new jobs")
-            if error_count:
-                messages.warning(request, f"Failed to scrape {error_count} channels")
+            # Process new jobs with Gemini
+            if new_jobs_ids:
+                self.process_jobs_with_gemini(new_jobs_ids)
                 
         except Exception as e:
             messages.error(request, f"Error initializing Telegram client: {str(e)}")
             
+    def process_unprocessed_jobs(self, request, queryset):
+        """Process unprocessed jobs in batches of 10"""
+        try:
+            # Get all unprocessed jobs
+            unprocessed_jobs = Job.objects.filter(processed_by_llm=False).order_by('-telegram_message_date')
+            total_jobs = unprocessed_jobs.count()
+            
+            if total_jobs == 0:
+                messages.info(request, "No unprocessed jobs found.")
+                return
+                
+            # Process in batches of 10
+            batch_size = 10
+            processed_count = 0
+            error_count = 0
+            
+            for i in range(0, total_jobs, batch_size):
+                batch = unprocessed_jobs[i:i + batch_size]
+                job_ids = [job.id for job in batch]
+                
+                try:
+                    self.process_jobs_with_gemini(job_ids)
+                    processed_count += len(batch)
+                    messages.success(request, f"Successfully processed batch {i//batch_size + 1} ({len(batch)} jobs)")
+                except Exception as e:
+                    error_count += len(batch)
+                    messages.error(request, f"Error processing batch {i//batch_size + 1}: {str(e)}")
+            
+            if processed_count:
+                messages.success(request, f"Successfully processed {processed_count} jobs")
+            if error_count:
+                messages.warning(request, f"Failed to process {error_count} jobs")
+                
+        except Exception as e:
+            messages.error(request, f"Error during batch processing: {str(e)}")
+    
+    process_unprocessed_jobs.short_description = "Process unprocessed jobs with LLM (batches of 10)"
+    
+    def process_jobs_with_gemini(self, job_ids):
+        """Process jobs with Gemini to extract structured information"""
+        gemini_service = GeminiService()
+        logger = logging.getLogger(__name__)
+        
+        for job_id in job_ids:
+            try:
+                job = Job.objects.get(id=job_id)
+                
+                # Skip if already processed
+                if job.processed_by_llm:
+                    continue
+                
+                # Extract information using Gemini
+                prompt = f"""Extract the following information from this job posting. Return a JSON object with these fields:
+                - company_name: The name of the company (null if not found)
+                - location: Work location or office location (null if not found)
+                - recruiter_contact: Any contact information for the recruiter/HR (email, telegram username, phone, etc.) (null if not found)
+
+                Focus on finding:
+                1. Company name - look for phrases like "company:", "at", "with", or company names followed by common suffixes (Inc, LLC, Ltd)
+                2. Location - look for city names, country names, or phrases like "location:", "based in", "office in"
+                3. Recruiter contact - look for:
+                   - Telegram usernames (starting with @)
+                   - Email addresses
+                   - Phone numbers
+                   - Links to contact forms or profiles
+                   - Phrases like "contact", "apply", "send CV to", "HR"
+
+                Job Posting:
+                {job.telegram_raw_text}
+                """
+                
+                extracted_data = gemini_service.extract_job_info(prompt)
+                
+                # Update job with extracted information
+                job.extracted_data = extracted_data
+                job.processed_by_llm = True
+                
+                # Update fields from extracted data
+                if extracted_data.get('company_name'):
+                    job.company_name = extracted_data['company_name']
+                if extracted_data.get('location'):
+                    job.location = extracted_data['location']
+                if extracted_data.get('recruiter_contact'):
+                    job.recruiter_contact = extracted_data['recruiter_contact']
+                
+                job.save()
+                logger.info(f"Successfully processed job {job_id} with Gemini")
+                
+            except Exception as e:
+                logger.error(f"Error processing job {job_id} with Gemini: {str(e)}")
+                raise  # Re-raise to handle in the batch processor
+
     scrape_jobs.short_description = "Scrape jobs from selected channels"

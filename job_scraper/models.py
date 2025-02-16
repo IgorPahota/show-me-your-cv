@@ -49,6 +49,7 @@ class Job(models.Model):
     title = models.CharField(max_length=255)
     company_name = models.CharField(max_length=255, null=True, blank=True)
     location = models.CharField(max_length=255, null=True, blank=True)
+    recruiter_contact = models.CharField(max_length=255, null=True, blank=True, help_text="Contact information for the recruiter (email, telegram, etc.)")
     description = models.TextField()
     url = models.URLField(max_length=500)
     remote = models.BooleanField(default=False)
@@ -77,6 +78,10 @@ class Job(models.Model):
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    # New fields for extracted information
+    processed_by_llm = models.BooleanField(default=False)
+    extracted_data = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ['-telegram_message_date']

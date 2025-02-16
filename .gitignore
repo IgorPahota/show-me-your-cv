@@ -45,3 +45,6 @@ ENV/
 sessions/
 *.session
 *.session-journal
+
+# laTex plugin
+out/

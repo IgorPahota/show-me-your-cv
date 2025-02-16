@@ -1,6 +1,7 @@
 import google.generativeai as genai
 from django.conf import settings
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -104,3 +105,18 @@ class GeminiService:
     def create_pdf(self, resume_text):
         """Legacy method - kept for backward compatibility."""
         pass 
+
+    def extract_job_info(self, prompt):
+        """Extract structured information from job description using Gemini"""
+        try:
+            response = self.model.generate_content(prompt)
+            
+            # Parse the response as JSON
+            # Note: You might need to clean/format the response text
+            # depending on how Gemini returns the data
+            extracted_data = json.loads(response.text)
+            return extracted_data
+            
+        except Exception as e:
+            logger.error(f"Error extracting job info with Gemini: {str(e)}")
+            return {} 
